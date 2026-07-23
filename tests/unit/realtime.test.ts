@@ -291,4 +291,19 @@ describe('realtime delivery', () => {
     expect(projectSockets(workspaceProjectId)).toEqual([creatorSocket]);
     expect(creatorSocket.closes).toEqual([]);
   });
+
+  it('closeSocketsForUser spares sockets of the excepted session', () => {
+    const keptSessionId = newId();
+    const kept = new FakeSocket();
+    registerSocket(kept, member, keptSessionId);
+    const revoked = new FakeSocket();
+    registerSocket(revoked, member, newId());
+
+    closeSocketsForUser(member, keptSessionId);
+
+    expect(kept.closes).toEqual([]);
+    expect(getSocketState(kept)).toBeDefined();
+    expect(revoked.closes).toEqual([{ code: 4401, reason: 'Session revoked' }]);
+    expect(getSocketState(revoked)).toBeUndefined();
+  });
 });

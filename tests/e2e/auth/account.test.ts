@@ -4,6 +4,7 @@ import { db } from '../../helpers/database';
 import { uniqueEmail } from '../../helpers/fixtures';
 import { resetRateLimiter } from '../../../src/middleware/rateLimit';
 import { createResetToken } from '../../../src/services/resetToken';
+import { hashSessionToken } from '../../../src/services/sessions';
 import { subscribeBus, SESSIONS_REVOKED, type BusEntry } from '../../../src/services/realtime/bus';
 
 async function alternativeIdOf(userId: string): Promise<string> {
@@ -162,8 +163,17 @@ describe('Account management', () => {
         expect(body.user).toEqual({ id: user.id, email: user.email, name: user.name });
         newToken = body.token;
       });
+      const newSession = await db
+        .selectFrom('session')
+        .select('id')
+        .where('token_hash', '=', hashSessionToken(newToken))
+        .executeTakeFirstOrThrow();
       expect(seen).toEqual([
-        { type: SESSIONS_REVOKED, project_id: null, data: { user_id: user.id } },
+        {
+          type: SESSIONS_REVOKED,
+          project_id: null,
+          data: { user_id: user.id, except_session_id: newSession.id },
+        },
       ]);
 
       expect((await ctx.request(user.token).get('/api/auth/me')).status).toBe(401);

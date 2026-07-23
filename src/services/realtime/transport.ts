@@ -35,8 +35,11 @@ export interface RealtimeHandle {
   close(): void;
 }
 
-export function closeSocketsForUser(userId: string): void {
+export function closeSocketsForUser(userId: string, exceptSessionId?: string): void {
   for (const socket of socketsForUser(userId)) {
+    if (exceptSessionId !== undefined && getSocketState(socket)?.sessionId === exceptSessionId) {
+      continue;
+    }
     // close() completes asynchronously; remove now so nothing is delivered to
     // a revoked socket in the interim.
     removeSocket(socket);
@@ -166,9 +169,12 @@ function handleConnection(ws: WebSocket): void {
 
 function handleBusEntry(entry: BusEntry): void {
   if (entry.type === SESSIONS_REVOKED) {
-    const userId = (entry.data as { user_id?: unknown } | null)?.user_id;
-    if (typeof userId === 'string') {
-      closeSocketsForUser(userId);
+    const data = entry.data as { user_id?: unknown; except_session_id?: unknown } | null;
+    if (typeof data?.user_id === 'string') {
+      closeSocketsForUser(
+        data.user_id,
+        typeof data.except_session_id === 'string' ? data.except_session_id : undefined
+      );
     }
     return;
   }

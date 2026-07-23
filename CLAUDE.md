@@ -59,7 +59,8 @@ touch `gamedev@skylerberg.com` or its rows.
   spec. Handshake: `{ type: 'auth', token }` within 10s, then
   `subscribe`/`unsubscribe` with a `project_id`; ping/pong heartbeat every 30s.
   Session revocation publishes `sessions_revoked` on the realtime bus, which
-  closes that user's sockets with code 4401.
+  closes that user's sockets with code 4401; the event's optional
+  `except_session_id` spares the session a password change just issued.
 - The realtime bus is in-process by default; when `REDIS_URL` is set (as in
   production, which runs 2+ replicas) publishes fan out via Redis pub/sub so
   every replica delivers to its own sockets. Rate limits also share Redis
