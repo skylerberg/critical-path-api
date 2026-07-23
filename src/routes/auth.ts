@@ -38,7 +38,8 @@ const router: AppHono = new Hono();
 async function setPasswordAndRevokeSessions(
   c: Pick<AppContext, 'get'>,
   userId: string,
-  newPassword: string
+  newPassword: string,
+  exceptSessionId?: string
 ): Promise<void> {
   const db = c.get('db');
   await db
@@ -46,8 +47,19 @@ async function setPasswordAndRevokeSessions(
     .set({ password_hash: await hashPassword(newPassword), alternative_id: crypto.randomUUID() })
     .where('id', '=', userId)
     .execute();
-  await db.deleteFrom('session').where('user_id', '=', userId).execute();
-  publishAfterCommit(c, SESSIONS_REVOKED, null, { user_id: userId });
+  let deletion = db.deleteFrom('session').where('user_id', '=', userId);
+  if (exceptSessionId !== undefined) {
+    deletion = deletion.where('id', '!=', exceptSessionId);
+  }
+  await deletion.execute();
+  publishAfterCommit(
+    c,
+    SESSIONS_REVOKED,
+    null,
+    exceptSessionId === undefined
+      ? { user_id: userId }
+      : { user_id: userId, except_session_id: exceptSessionId }
+  );
 }
 
 router.post(
@@ -103,7 +115,7 @@ router.post(
       throw err;
     }
 
-    const token = await createSession(db, id);
+    const { token } = await createSession(db, id);
 
     return c.json({ token, user: { id, email, name } }, 201);
   }
@@ -153,7 +165,7 @@ router.post(
       throw new AppError(401, 'Invalid email or password');
     }
 
-    const token = await createSession(db, user.id);
+    const { token } = await createSession(db, user.id);
 
     return c.json({ token, user: { id: user.id, email: user.email, name: user.name } }, 200);
   }
@@ -326,10 +338,10 @@ router.post(
       throw new AppError(401, 'Current password is incorrect');
     }
 
-    await setPasswordAndRevokeSessions(c, user.id, new_password);
-    const token = await createSession(c.get('db'), user.id);
+    const session = await createSession(c.get('db'), user.id);
+    await setPasswordAndRevokeSessions(c, user.id, new_password, session.id);
 
-    return c.json({ token, user }, 200);
+    return c.json({ token: session.token, user }, 200);
   }
 );
 

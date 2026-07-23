@@ -2,8 +2,14 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { serve, type ServerType } from '@hono/node-server';
 import WebSocket from 'ws';
 import { app } from '../../../src/index';
-import { attachRealtime, projectSockets } from '../../../src/services/realtime/index';
-import type { RealtimeHandle } from '../../../src/services/realtime/index';
+import {
+  attachRealtime,
+  projectSockets,
+  publish,
+  subscribeBus,
+  SESSIONS_REVOKED,
+} from '../../../src/services/realtime/index';
+import type { BusEntry, RealtimeHandle } from '../../../src/services/realtime/index';
 import { TestContext, type TestUser } from '../../setup/testContext';
 import { db } from '../../helpers/database';
 import { newId } from '../../helpers/fixtures';
@@ -521,5 +527,35 @@ describe('Realtime end to end', () => {
 
     await waitFor(async () => clientD.closeInfo !== null);
     expect(clientD.closeInfo).toEqual({ code: 4401, reason: 'Session revoked' });
+  });
+
+  // A replica can process sessions_revoked after the caller has already
+  // reconnected with its fresh token; the surviving session must be spared.
+  it('does not close a socket authenticated with the surviving session', async () => {
+    const userE = await ctx.createUser('rt-e');
+    const clientOld = await connect(userE.token);
+
+    const revocations: BusEntry[] = [];
+    const unsubscribe = subscribeBus((entry) => {
+      if (entry.type === SESSIONS_REVOKED) revocations.push(entry);
+    });
+    let newToken: string;
+    try {
+      const res = await ctx.request(userE.token).post('/api/auth/change-password', {
+        current_password: userE.password,
+        new_password: 'brand-new-password-123',
+      });
+      expect(res.status).toBe(200);
+      newToken = ((await res.json()) as { token: string }).token;
+    } finally {
+      unsubscribe();
+    }
+    await waitFor(async () => clientOld.closeInfo !== null);
+    expect(revocations).toHaveLength(1);
+
+    const clientNew = await connect(newToken);
+    publish(revocations[0]);
+    await settle();
+    expect(clientNew.closeInfo).toBeNull();
   });
 });
